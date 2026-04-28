@@ -1,0 +1,6 @@
+@CW7_Pod_kolosa_HostAddress = http://localhost:5250
+
+GET {{CW7_Pod_kolosa_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
