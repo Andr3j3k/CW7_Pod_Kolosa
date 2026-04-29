@@ -8,4 +8,5 @@ public interface IDbService
     Task<AppointmentDetailsDto> GetAppointmentDetailsAsync(int idAppointment);
     Task<int> CreateAsync(CreateAppointmentRequestDto dto);
     Task UpdateAsync(int idAppointment, UpdateAppointmentRequestDto dto);
+    Task DeleteAsync(int idAppointment);
 }

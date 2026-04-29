@@ -395,4 +395,64 @@ public class DbService : IDbService
         throw;
     }
         }
+
+    public async Task DeleteAsync(int idAppointment)
+    {
+        var checkAppointmentQuery = """
+                                    SELECT Status
+                                    FROM Appointments
+                                    WHERE IdAppointment = @IdAppointment;
+                                    """;
+
+        var deleteAppointmentQuery = """
+                                     DELETE FROM Appointments
+                                     WHERE IdAppointment = @IdAppointment;
+                                     """;
+
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        await using var command = new SqlCommand();
+        command.Connection = connection;
+        command.Transaction = transaction as SqlTransaction;
+
+        try
+        {
+            command.Parameters.Clear();
+            command.CommandText = checkAppointmentQuery;
+            command.Parameters.AddWithValue("@IdAppointment", idAppointment);
+
+            string currentStatus;
+
+            await using (var reader = await command.ExecuteReaderAsync())
+            {
+                if (!await reader.ReadAsync())
+                {
+                    throw new NotFoundException($"Appointment with id {idAppointment} not found.");
+                }
+
+                currentStatus = reader.GetString(reader.GetOrdinal("Status"));
+            }
+
+            if (currentStatus == "Completed")
+            {
+                throw new Exception("Completed appointment cannot be deleted.");
+            }
+
+            command.Parameters.Clear();
+            command.CommandText = deleteAppointmentQuery;
+            command.Parameters.AddWithValue("@IdAppointment", idAppointment);
+
+            await command.ExecuteNonQueryAsync();
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 }
