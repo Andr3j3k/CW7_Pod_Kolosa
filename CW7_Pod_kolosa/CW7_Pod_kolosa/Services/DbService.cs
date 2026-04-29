@@ -141,4 +141,113 @@ public class DbService : IDbService
         }
         return result ?? throw new NotFoundException("Appointment not found");
     }
+    
+    public async Task<int> CreateAsync(CreateAppointmentRequestDto dto)
+{
+    var checkPatientQuery = """
+                            SELECT 1
+                            FROM Patients
+                            WHERE IdPatient = @IdPatient AND IsActive = 1;
+                            """;
+
+    var checkDoctorQuery = """
+                           SELECT 1
+                           FROM Doctors
+                           WHERE IdDoctor = @IdDoctor AND IsActive = 1;
+                           """;
+
+    var checkDoctorConflictQuery = """
+                                   SELECT 1
+                                   FROM Appointments
+                                   WHERE IdDoctor = @IdDoctor
+                                     AND AppointmentDate = @AppointmentDate;
+                                   """;
+
+    var createAppointmentQuery = """
+                                 INSERT INTO Appointments
+                                 (IdPatient, IdDoctor, AppointmentDate, Status, Reason)
+                                 VALUES
+                                 (@IdPatient, @IdDoctor, @AppointmentDate, @Status, @Reason);
+
+                                 SELECT @@IDENTITY;
+                                 """;
+
+    if (dto.AppointmentDate < DateTime.Now)
+    {
+        throw new Exception("Appointment date cannot be in the past.");
+    }
+
+    if (string.IsNullOrWhiteSpace(dto.Reason))
+    {
+        throw new Exception("Reason cannot be empty.");
+    }
+
+    if (dto.Reason.Length > 250)
+    {
+        throw new Exception("Reason cannot be longer than 250 characters.");
+    }
+
+    await using var connection = new SqlConnection(_connectionString);
+    await connection.OpenAsync();
+
+    await using var transaction = await connection.BeginTransactionAsync();
+
+    await using var command = new SqlCommand();
+    command.Connection = connection;
+    command.Transaction = transaction as SqlTransaction;
+
+    try
+    {
+        command.Parameters.Clear();
+        command.CommandText = checkPatientQuery;
+        command.Parameters.AddWithValue("@IdPatient", dto.IdPatient);
+
+        var patientResult = await command.ExecuteScalarAsync();
+        if (patientResult == null)
+        {
+            throw new NotFoundException($"Patient with id {dto.IdPatient} not found or inactive.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = checkDoctorQuery;
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+
+        var doctorResult = await command.ExecuteScalarAsync();
+        if (doctorResult == null)
+        {
+            throw new NotFoundException($"Doctor with id {dto.IdDoctor} not found or inactive.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = checkDoctorConflictQuery;
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+        command.Parameters.AddWithValue("@AppointmentDate", dto.AppointmentDate);
+
+        var conflictResult = await command.ExecuteScalarAsync();
+        if (conflictResult != null)
+        {
+            throw new Exception("Doctor already has an appointment at this time.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = createAppointmentQuery;
+        command.Parameters.AddWithValue("@IdPatient", dto.IdPatient);
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+        command.Parameters.AddWithValue("@AppointmentDate", dto.AppointmentDate);
+        command.Parameters.AddWithValue("@Status", "Scheduled");
+        command.Parameters.AddWithValue("@Reason", dto.Reason);
+
+        var appointmentObject = await command.ExecuteScalarAsync();
+        var appointmentId = Convert.ToInt32(appointmentObject);
+
+        await transaction.CommitAsync();
+
+        return appointmentId;
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+}
 }

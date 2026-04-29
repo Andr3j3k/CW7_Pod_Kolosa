@@ -1,4 +1,5 @@
-﻿using CW7_Pod_kolosa.Exceptions;
+﻿using CW7_Pod_kolosa.DTOs;
+using CW7_Pod_kolosa.Exceptions;
 using CW7_Pod_kolosa.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -41,6 +42,20 @@ public class AppointmentsController : ControllerBase
         catch (NotFoundException e)
         {
             return  NotFound(e.Message);
+        }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateAppointmentRequestDto dto)
+    {
+        try
+        {
+            var id = await _dbService.CreateAsync(dto);
+            return Created($"api/appointments/{id}", new { idAppointment = id });
+        }
+        catch (NotFoundException e)
+        {
+            return Conflict(e.Message);
         }
     }
     
