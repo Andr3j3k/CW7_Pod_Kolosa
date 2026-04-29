@@ -59,4 +59,19 @@ public class AppointmentsController : ControllerBase
         }
     }
     
+    [Route("{idAppointment:int}")]
+    [HttpPut]
+    public async Task<IActionResult> Update([FromRoute]int idAppointment,[FromBody] UpdateAppointmentRequestDto dto)
+    {
+        try
+        {
+            await _dbService.UpdateAsync(idAppointment, dto);
+            return Ok();
+        }
+        catch (NotFoundException e)
+        {
+            return NotFound(e.Message);
+        }
+    }
+    
 }

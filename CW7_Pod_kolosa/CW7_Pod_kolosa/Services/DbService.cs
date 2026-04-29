@@ -250,4 +250,149 @@ public class DbService : IDbService
         throw;
     }
 }
+
+    public async Task UpdateAsync(int idAppointment, UpdateAppointmentRequestDto dto)
+    {
+        var checkAppointmentQuery = """
+                                    SELECT Status, AppointmentDate
+                                    FROM Appointments
+                                    WHERE IdAppointment = @IdAppointment;
+                                    """;
+
+        var checkPatientQuery = """
+                                SELECT 1
+                                FROM Patients
+                                WHERE IdPatient = @IdPatient AND IsActive = 1;
+                                """;
+
+        var checkDoctorQuery = """
+                               SELECT 1
+                               FROM Doctors
+                               WHERE IdDoctor = @IdDoctor AND IsActive = 1;
+                               """;
+
+        var checkDoctorConflictQuery = """
+                                       SELECT 1
+                                       FROM Appointments
+                                       WHERE IdDoctor = @IdDoctor
+                                         AND AppointmentDate = @AppointmentDate
+                                         AND IdAppointment <> @IdAppointment;
+                                       """;
+
+        var updateAppointmentQuery = """
+                                     UPDATE Appointments
+                                     SET
+                                         IdPatient = @IdPatient,
+                                         IdDoctor = @IdDoctor,
+                                         AppointmentDate = @AppointmentDate,
+                                         Status = @Status,
+                                         Reason = @Reason,
+                                         InternalNotes = @InternalNotes
+                                     WHERE IdAppointment = @IdAppointment;
+                                     """;
+
+        if (dto.AppointmentDate < DateTime.Now)
+        {
+            throw new Exception("Appointment date cannot be in the past.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            throw new Exception("Reason cannot be empty.");
+        }
+
+        if (dto.Status != "Scheduled" && dto.Status != "Completed" && dto.Status != "Canceled")
+        {
+            throw new Exception("Status must be scheduled, completed or canceled.");
+        }
+        
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+        
+        await using var transaction = await connection.BeginTransactionAsync();
+        
+        await using var command = new SqlCommand();
+        command.Connection = connection;
+        command.Transaction = transaction as SqlTransaction;
+
+        try
+        {
+            command.Parameters.Clear();
+            command.CommandText=checkAppointmentQuery;
+            command.Parameters.AddWithValue("@IdAppointment", idAppointment);
+
+            string currentStatus;
+            DateTime currentAppointmentDate;
+
+            await using (var reader = await command.ExecuteReaderAsync())
+            {
+                if (!await reader.ReadAsync())
+                {
+                    throw new NotFoundException($"Appointment with id {idAppointment} not found.");
+                }
+                
+                currentStatus = reader.GetString(reader.GetOrdinal("Status"));
+                currentAppointmentDate=reader.GetDateTime(reader.GetOrdinal("AppointmentDate"));
+            }
+            
+            if (currentStatus == "Completed" && currentAppointmentDate != dto.AppointmentDate)
+        {
+            throw new Exception("Completed appointment date cannot be changed.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = checkPatientQuery;
+        command.Parameters.AddWithValue("@IdPatient", dto.IdPatient);
+
+        var patientResult = await command.ExecuteScalarAsync();
+        if (patientResult == null)
+        {
+            throw new NotFoundException($"Patient with id {dto.IdPatient} not found or inactive.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = checkDoctorQuery;
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+
+        var doctorResult = await command.ExecuteScalarAsync();
+        if (doctorResult == null)
+        {
+            throw new NotFoundException($"Doctor with id {dto.IdDoctor} not found or inactive.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = checkDoctorConflictQuery;
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+        command.Parameters.AddWithValue("@AppointmentDate", dto.AppointmentDate);
+        command.Parameters.AddWithValue("@IdAppointment", idAppointment);
+
+        var conflictResult = await command.ExecuteScalarAsync();
+        if (conflictResult != null)
+        {
+            throw new Exception("Doctor already has another appointment at this time.");
+        }
+
+        command.Parameters.Clear();
+        command.CommandText = updateAppointmentQuery;
+        command.Parameters.AddWithValue("@IdAppointment", idAppointment);
+        command.Parameters.AddWithValue("@IdPatient", dto.IdPatient);
+        command.Parameters.AddWithValue("@IdDoctor", dto.IdDoctor);
+        command.Parameters.AddWithValue("@AppointmentDate", dto.AppointmentDate);
+        command.Parameters.AddWithValue("@Status", dto.Status);
+        command.Parameters.AddWithValue("@Reason", dto.Reason);
+        command.Parameters.AddWithValue(
+            "@InternalNotes",
+            string.IsNullOrWhiteSpace(dto.InternalNotes) ? DBNull.Value : dto.InternalNotes
+        );
+
+        await command.ExecuteNonQueryAsync();
+
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+        }
 }
